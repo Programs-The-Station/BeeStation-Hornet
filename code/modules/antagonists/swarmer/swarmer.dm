@@ -1,3 +1,5 @@
+#define COMSIG_SWARM_MACHINE_CHANGE "swarmer_fabricated_machine"
+
 ////Deactivated swarmer shell////
 /obj/item/deactivated_swarmer
 	name = "deactivated swarmer"
@@ -101,6 +103,9 @@
 	light_range = 3
 	light_on = TRUE
 	light_color = LIGHT_COLOR_CYAN
+
+/mob/living/simple_animal/hostile/swarmer/debug
+	resources = 500
 
 /mob/living/simple_animal/hostile/swarmer/Initialize(mapload)
 	. = ..()
@@ -429,11 +434,12 @@
 /mob/living/simple_animal/hostile/swarmer/proc/Fabricate(atom/fabrication_object,fabrication_cost = 0)
 	if(!isturf(loc))
 		to_chat(src, "<span class='warning'>This is not a suitable location for fabrication. We need more space.</span>")
+		return null
 	if(resources >= fabrication_cost)
 		resources -= fabrication_cost
 	else
 		to_chat(src, "<span class='warning'>You do not have the necessary resources to fabricate this object.</span>")
-		return 0
+		return null
 	return new fabrication_object(loc)
 
 /mob/living/simple_animal/hostile/swarmer/proc/Integrate(atom/movable/target)
@@ -635,7 +641,6 @@
 	if(do_after(src, 1 SECONDS))
 		Fabricate(/obj/structure/swarmer/blockade, 5)
 
-
 /obj/structure/swarmer/blockade
 	name = "swarmer blockade"
 	desc = "A quickly assembled energy blockade. Will not retain its form if damaged enough, but disabler beams and swarmers pass right through."
@@ -648,6 +653,208 @@
 	. = ..()
 	if(isswarmer(mover) || istype(mover, /obj/projectile/beam/disabler))
 		return TRUE
+
+/obj/structure/swarmer/machine
+	name = "swarmer machine"
+	desc = "Top Level Holder of a swarmer machine. Should not exist, bug a coder."
+	icon_state = ""
+	base_icon_state = ""
+	smoothing_flags = SMOOTH_BITMASK
+	smoothing_groups = list(SMOOTH_GROUP_SWARM_MACHINE)
+	canSmoothWith = list(SMOOTH_GROUP_SWARM_MACHINE)
+	light_range = MINIMUM_USEFUL_LIGHT_RANGE
+	max_integrity = 50
+	density = TRUE
+	var/last_update_time = 0 //Stores the last time the length algorithm touched this node. Used to "close" nodes.
+	var/path_length = INFINITY //Infinity is no path currently to this object.
+
+//Default CanAllow for Swarmer Machine Components
+/obj/structure/swarmer/machine/CanAllowThrough(atom/movable/mover, border_dir)
+	. = ..()
+	if(isswarmer(mover) || istype(mover, /obj/projectile/beam/disabler))
+		return TRUE
+
+//Default CanAllow for Swarmer Machine Components
+/obj/structure/swarmer/machine/Destroy()
+	.=..()
+	SEND_SIGNAL(src,COMSIG_SWARM_MACHINE_CHANGE) //Alert the Core that a part has been destroyed.
+
+/mob/living/simple_animal/hostile/swarmer/proc/CreateCore()
+	set name = "Create core"
+	set category = "Swarmer"
+	set desc = "Creates the core of the Machine."
+
+	var/datum/antagonist/swarmer/S = mind?.has_antag_datum(/datum/antagonist/swarmer)
+	if(S)
+		var/obj/structure/swarmer/machine/core/C = S.swarm.core
+		if(C)
+			to_chat(src, "<span class='warning'>There is already a Machine Core constructed. Aborting.</span>")
+			return
+	else
+		stack_trace("Swarmer [usr] attempted to construct the machine core without an antag datum")
+		return
+
+	if(resources < 5)
+		to_chat(src, "<span class='warning'>We do not have the resources for this!</span>")
+		return
+	if(do_after(src, 1 SECONDS))
+		var/obj/structure/swarmer/machine/core/C = Fabricate(/obj/structure/swarmer/machine/core, 5)
+		if(C)
+			S.swarm.core = C //Make links
+			C.swarm = S.swarm
+			investigate_log("constructed a machine core @ [C.x], [C.y], [C.z]", INVESTIGATE_SWARMER)
+
+
+/obj/structure/swarmer/machine/core
+	name = "swarmer machine core"
+	desc = "The core of the machine that the swarmers appear to be constructing."
+	icon_state = "swarmer_console"
+	smoothing_flags = null
+	max_integrity = 500 //More health for a big machine
+	var/datum/team/swarmer/swarm = null //Backreference to the team that owns this core.
+	var/obj/structure/swarmer/machine/longest_path_atom = null //Stores the location of the longest path
+	var/longest_path_length = 0
+	var/
+
+/obj/structure/swarmer/machine/core/Initialize(mapload)
+	. = ..()
+	RegisterSignal(src , COMSIG_SWARM_MACHINE_CHANGE, PROC_REF(update_fiber_lengths))
+
+/obj/structure/swarmer/machine/core/Destroy()
+	. = ..()
+	//Stop looking for machine construction elements
+	UnregisterSignal(src, COMSIG_SWARM_MACHINE_CHANGE)
+
+	//Resmooth fibers nearby. Uses the parent type.
+	//Todo: Figure out why this is not working properly.
+	var/obj/structure/swarmer/machine/M = src
+	QUEUE_SMOOTH_NEIGHBORS(M)
+
+	//Make sure to delete the back reference.
+	if(swarm)
+		swarm.core = null
+	else
+		stack_trace("Swarmer Machine Core had no swarm attached on delete!")
+
+	//Then clear this reference, just for safety.
+	swarm = null
+
+/proc/debugText(msg)
+	for(var/i in GLOB.mob_list)
+		var/mob/M = i
+		if(isswarmer(M))
+			to_chat(M, msg)
+
+/obj/structure/swarmer/machine/core/proc/update_fiber_lengths()
+	SIGNAL_HANDLER
+	var/path_time = world.time
+	debugText("Triggered Update @ [path_time]")
+	src.last_update_time = path_time
+	src.path_length = 0
+
+	var/_longest_path_length = 0
+	var/obj/structure/swarmer/machine/_longest_path_atom = null
+
+	var/list/openNodeList = list()
+	//Initialize List of First. Don't check for last update time yet, since this is the first step.
+	for(var/direction in GLOB.cardinals)
+		var/turf/target_turf = get_step(src, direction)
+		var/obj/structure/swarmer/machine/M = ( locate(/obj/structure/swarmer/machine) in target_turf )
+		if(M)
+			openNodeList += M
+			M.last_update_time = path_time
+			M.path_length = src.path_length + 1
+			M.maptext = MAPTEXT(M.path_length)
+			if(M.path_length > _longest_path_length)
+				_longest_path_length = M.path_length
+				_longest_path_atom = M
+
+	//Process all open Machine Nodes
+	var/count = 0
+	while(openNodeList.len)
+		var/obj/structure/swarmer/machine/root = openNodeList[1]
+		if(root)
+			for(var/direction in GLOB.cardinals)
+				var/turf/target_turf = get_step(root, direction)
+				var/obj/structure/swarmer/machine/M = ( locate(/obj/structure/swarmer/machine) in target_turf )
+				if(M)
+					//Check to make sure we haven't touched it yet...
+					if(M.last_update_time != path_time)
+						//If we haven't, add it to the list
+						openNodeList += M
+						//Close the node by setting the update time
+						M.last_update_time = path_time
+						//Update the path length
+						M.path_length = root.path_length + 1
+						M.maptext = MAPTEXT(M.path_length)
+
+						if(M.path_length > _longest_path_length)
+							_longest_path_length = M.path_length
+							_longest_path_atom = M
+		openNodeList.Cut(1,2)//Remove the first element
+
+		//Infinite Loop Safety.
+		count += 1
+		if(count > 1000) //This number is the maximum number of fiber elements the algorithm will process.
+			//Todo: Handle this more gracefully.
+			stack_trace("Swarmer Machine Core Checking Longest Fiber Hit Max Iteration Limit")
+			break
+
+	src.longest_path_length = _longest_path_length
+	src.longest_path_atom = _longest_path_atom
+	src.maptext = MAPTEXT(src.longest_path_length)
+	src.longest_path_atom.maptext = MAPTEXT("[src.longest_path_length] LONG")
+
+
+/mob/living/simple_animal/hostile/swarmer/proc/CreateFiber()
+	set name = "Create Fiber"
+	set category = "Swarmer"
+	set desc = "Expand the Machine"
+	if(locate(/obj/structure/swarmer/machine) in loc)
+		to_chat(src, "<span class='warning'>There is already a machine here. Aborting.</span>")
+		return
+
+	var/list/otherMachines = list()
+	for(var/direction in GLOB.cardinals)
+		var/turf/target_turf = get_step(src, direction)
+		var/obj/structure/swarmer/machine/M = ( locate(/obj/structure/swarmer/machine) in target_turf )
+		if(M)
+			otherMachines += M
+
+	if(otherMachines.len == 0)
+		to_chat(src, "<span class='warning'>This fiber needs to be connected to another!</span>")
+		return
+	if(otherMachines.len == 2)
+		//We might be repairing a fiber... check the timestamps on the pathing. If the paths are connected
+		//they will match.
+		var/obj/structure/swarmer/machine/M1 = otherMachines[1]
+		var/obj/structure/swarmer/machine/M2 = otherMachines[2]
+		if(M1.last_update_time == M2.last_update_time)
+			to_chat(src, "<span class='warning'>This fiber can only connect to one other active fiber!</span>")
+			return
+		else
+			to_chat(src,"<span class='notice'>Beginning Fiber Repair...</span>")
+	if(otherMachines.len >= 3)
+		//This is illegal.
+		to_chat(src, "<span class='warning'>This fiber can only connect to one other fiber!</span>")
+		return
+
+	if(resources < 5)
+		to_chat(src, "<span class='warning'>We do not have the resources for this!</span>")
+		return
+	if(do_after(src, 1 SECONDS))
+		//Make sure that there wasn't a fiber constructed in the do_after time.
+		if(locate(/obj/structure/swarmer/machine) in loc)
+			to_chat(src, "<span class='warning'>There is already a machine here. Aborting.</span>")
+			return
+		var/obj/structure/swarmer/machine/M = Fabricate(/obj/structure/swarmer/machine/fiber, 5)
+		SEND_SIGNAL(M,COMSIG_SWARM_MACHINE_CHANGE) //Alert the Core that we've built a new machine component.
+
+/obj/structure/swarmer/machine/fiber
+	name = "swarmer fiber"
+	desc = "A quickly assembled energy blockade. Will not retain its form if damaged enough, but disabler beams and swarmers pass right through."
+	icon_state = "swarmer_fiber-0"
+	base_icon_state = "swarmer_fiber"
 
 /mob/living/simple_animal/hostile/swarmer/proc/CreateSwarmer()
 	set name = "Replicate"
@@ -722,6 +929,7 @@
 /datum/team/swarmer
 	name = "Swarmers"
 	var/total_resources_eaten = 0
+	var/obj/structure/swarmer/machine/core = null
 
 /datum/antagonist/swarmer/get_team()
 	return swarm
@@ -831,3 +1039,5 @@
 		parts += "<span class='redtext big'>The swarm has failed.</span>"
 
 	return "<div class='panel redborder'>[parts.Join("<br>")]</div>"
+
+#undef COMSIG_SWARM_MACHINE_CHANGE

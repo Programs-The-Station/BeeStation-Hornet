@@ -23,6 +23,26 @@
 		var/mob/living/simple_animal/hostile/swarmer/S = usr
 		S.CreateBarricade()
 
+/atom/movable/screen/swarmer/Core
+	icon_state = "ui_core"
+	name = "Create Machine Core (Costs 5 Resources)"
+	desc = "Start the Machine (Costs 5 resources)"
+
+/atom/movable/screen/swarmer/Core/Click()
+	if(isswarmer(usr))
+		var/mob/living/simple_animal/hostile/swarmer/S = usr
+		S.CreateCore()
+
+/atom/movable/screen/swarmer/Fiber
+	icon_state = "ui_fiber"
+	name = "Create Fiber (Costs 5 Resources)"
+	desc = "Expand the Machine. (Costs 5 resources)"
+
+/atom/movable/screen/swarmer/Fiber/Click()
+	if(isswarmer(usr))
+		var/mob/living/simple_animal/hostile/swarmer/S = usr
+		S.CreateFiber()
+
 /atom/movable/screen/swarmer/Replicate
 	icon_state = "ui_replicate"
 	name = "Replicate (Costs 50 Resources)"
@@ -68,12 +88,22 @@
 	var/atom/movable/screen/using
 
 	using = new /atom/movable/screen/swarmer/FabricateTrap()
+	using.screen_loc = ui_hand_position(1)
+	using.hud = src
+	static_inventory += using
+
+	using = new /atom/movable/screen/swarmer/Core()
+	using.screen_loc = ui_hand_position(4)
+	using.hud = src
+	static_inventory += using
+
+	using = new /atom/movable/screen/swarmer/Fiber()
 	using.screen_loc = ui_hand_position(2)
 	using.hud = src
 	static_inventory += using
 
 	using = new /atom/movable/screen/swarmer/Barricade()
-	using.screen_loc = ui_hand_position(1)
+	using.screen_loc = ui_hand_position(3)
 	using.hud = src
 	static_inventory += using
 

@@ -29,6 +29,7 @@
 		INVESTIGATE_RESEARCH,
 		INVESTIGATE_TELESCI,
 		INVESTIGATE_WIRES,
+		INVESTIGATE_SWARMER,
 	)
 
 	var/list/logs_present = list("notes, memos, watchlist")

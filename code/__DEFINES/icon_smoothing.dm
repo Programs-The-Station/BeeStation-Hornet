@@ -121,6 +121,9 @@ DEFINE_BITFIELD(smoothing_flags, list(
 #define SMOOTH_GROUP_CLEANABLE_DIRT	S_OBJ(67)			///obj/effect/decal/cleanable/dirt
 #define SMOOTH_GROUP_COMPUTERS S_OBJ(68)				///obj/machinery/computer/_computer
 
+#define SMOOTH_GROUP_SWARM_MACHINE S_OBJ(69)				///obj/structure/swarmer/machine
+
+
 //LIQUIDS
 
 #define SMOOTH_GROUP_WATER S_OBJ(73) ///obj/effect/abstract/liquid_turf
