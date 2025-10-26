@@ -4657,8 +4657,6 @@
 #include "code\modules\wiremod\datatypes\option.dm"
 #include "code\modules\wiremod\datatypes\signal.dm"
 #include "code\modules\wiremod\datatypes\string.dm"
-#include "code\modules\wiremod\preset\hello_world.dm"
-#include "code\modules\wiremod\preset\speech_relay.dm"
 #include "code\modules\wiremod\shell\airlock.dm"
 #include "code\modules\wiremod\shell\assembly.dm"
 #include "code\modules\wiremod\shell\bot.dm"
